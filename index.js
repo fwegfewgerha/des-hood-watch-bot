@@ -1,8 +1,11 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, Collection, Events, MessageFlags } = require('discord.js');
 
-const embedCommand = require('./commands/embed');
+const commandList = require('./commands');
 const { handleButton, handleChannelSelect, handleModalSubmit } = require('./handlers/embedInteractions');
+const { handleMessageCreate } = require('./handlers/messageTracking');
+const { handleVoiceStateUpdate, primeVoiceSessions } = require('./handlers/voiceTracking');
+const { handleGuildMemberAdd } = require('./handlers/memberJoin');
 
 if (!process.env.DISCORD_TOKEN) {
   console.error('Missing DISCORD_TOKEN. Copy .env.example to .env and fill it in.');
@@ -13,18 +16,43 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    // Required so "Move Existing" can read the embed on an arbitrary
-    // message. Enable "Message Content Intent" for this bot at
+    // Required for /stats voice-time tracking.
+    GatewayIntentBits.GuildVoiceStates,
+    // Required for guildMemberAdd to fire at all (raidprotect auto-kick
+    // and mass-join detection). Enable "Server Members Intent" for this
+    // bot at https://discord.com/developers/applications -> your app -> Bot.
+    GatewayIntentBits.GuildMembers,
+    // Required so "Move Existing" and /secure can read message content.
+    // Enable "Message Content Intent" for this bot at
     // https://discord.com/developers/applications -> your app -> Bot.
     GatewayIntentBits.MessageContent,
   ],
 });
 
 client.commands = new Collection();
-client.commands.set(embedCommand.data.name, embedCommand);
+for (const command of commandList) {
+  client.commands.set(command.data.name, command);
+}
 
 client.once(Events.ClientReady, (c) => {
   console.log(`Des Hood Watch is online as ${c.user.tag}`);
+  primeVoiceSessions(c);
+});
+
+client.on(Events.MessageCreate, (message) => {
+  handleMessageCreate(message).catch((err) => console.error('messageCreate handler error:', err));
+});
+
+client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+  try {
+    handleVoiceStateUpdate(oldState, newState);
+  } catch (err) {
+    console.error('voiceStateUpdate handler error:', err);
+  }
+});
+
+client.on(Events.GuildMemberAdd, (member) => {
+  handleGuildMemberAdd(member).catch((err) => console.error('guildMemberAdd handler error:', err));
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
