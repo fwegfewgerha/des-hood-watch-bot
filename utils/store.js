@@ -27,6 +27,12 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   // Railway's internal Postgres connections don't need a verified cert chain.
   ssl: process.env.DATABASE_URL.includes('railway') ? { rejectUnauthorized: false } : undefined,
+  // pg closes idle connections after 10s by default. On a quiet server that
+  // means nearly every command's first query pays a fresh TCP+TLS+auth
+  // handshake — far more expensive than the query itself. Hold connections
+  // open instead; an idle socket costs effectively nothing here.
+  idleTimeoutMillis: 0,
+  keepAlive: true,
 });
 
 async function init() {

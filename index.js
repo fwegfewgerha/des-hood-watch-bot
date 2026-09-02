@@ -52,6 +52,17 @@ client.once(Events.ClientReady, (c) => {
   console.log(`Des Hood Watch is online as ${c.user.tag}`);
   primeVoiceSessions(c);
   store.warmRaidProtectCache().catch((err) => console.error('Failed to warm raid-protect cache:', err));
+
+  // Pull the full member list into the gateway cache once, so the cache-first
+  // lookup in /stats is a guaranteed hit rather than a coin flip on whether
+  // that member happened to be seen recently. Backgrounded — the bot is
+  // already serving commands while this runs.
+  for (const guild of c.guilds.cache.values()) {
+    guild.members
+      .fetch()
+      .then((members) => console.log(`Primed member cache for ${guild.name}: ${members.size} members.`))
+      .catch((err) => console.error(`Failed to prime member cache for ${guild.id}:`, err.message));
+  }
 });
 
 client.on(Events.MessageCreate, (message) => {
