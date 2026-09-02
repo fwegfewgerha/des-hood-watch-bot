@@ -23,7 +23,11 @@ module.exports = {
 
   async execute(interaction) {
     const target = interaction.options.getUser('user') || interaction.user;
-    const member = await interaction.guild.members.fetch(target.id).catch(() => null);
+    // Cache hit is the common case (the member usually already showed up via
+    // a message/voice/join event) and skips a REST round-trip entirely.
+    const member =
+      interaction.guild.members.cache.get(target.id) ??
+      (await interaction.guild.members.fetch(target.id).catch(() => null));
 
     if (!member) {
       return interaction.reply({

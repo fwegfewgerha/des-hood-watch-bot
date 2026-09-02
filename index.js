@@ -13,6 +13,19 @@ if (!process.env.DISCORD_TOKEN) {
   process.exit(1);
 }
 
+if (!process.env.ALLOWED_USER_IDS) {
+  console.error('Missing ALLOWED_USER_IDS. Set a comma-separated list of Discord user IDs allowed to use this bot.');
+  process.exit(1);
+}
+
+// Every interaction (slash commands and the embed builder's buttons/selects/
+// modals) is gated to this set, independent of Discord's own role/permission
+// system — so even someone with Administrator on the server can't use the
+// bot unless their user ID is explicitly listed here.
+const ALLOWED_USER_IDS = new Set(
+  process.env.ALLOWED_USER_IDS.split(',').map((id) => id.trim()).filter(Boolean)
+);
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -56,6 +69,13 @@ client.on(Events.GuildMemberAdd, (member) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  if (!ALLOWED_USER_IDS.has(interaction.user.id)) {
+    await interaction
+      .reply({ content: 'You are not authorized to use this bot.', flags: MessageFlags.Ephemeral })
+      .catch(() => {});
+    return;
+  }
+
   try {
     if (interaction.isChatInputCommand()) {
       const command = client.commands.get(interaction.commandName);

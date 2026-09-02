@@ -18,6 +18,13 @@ function isValidHttpUrl(value) {
   }
 }
 
+// Checks the gateway cache before hitting the REST API — a channel the bot
+// already knows about (the common case) resolves instantly instead of
+// paying a network round-trip on every embed-builder action.
+async function getChannelCached(manager, channelId) {
+  return manager.cache.get(channelId) ?? (await manager.fetch(channelId).catch(() => null));
+}
+
 // Edits the ephemeral builder message. Use when the interaction has NOT
 // been deferred/replied yet (fast, synchronous branches).
 async function refresh(interaction, draft, statusLine) {
@@ -148,11 +155,12 @@ async function handleMoveSubmit(interaction, draft, rawValue) {
     );
   }
 
+  const sourceChannel = await getChannelCached(interaction.client.channels, parsed.channelId);
+  if (!sourceChannel || !sourceChannel.isTextBased()) {
+    return finalize(interaction, draft, 'Could not find that channel. Nothing changed.');
+  }
+
   try {
-    const sourceChannel = await interaction.client.channels.fetch(parsed.channelId);
-    if (!sourceChannel || !sourceChannel.isTextBased()) {
-      return finalize(interaction, draft, 'Could not find that channel. Nothing changed.');
-    }
     const sourceMessage = await sourceChannel.messages.fetch(parsed.messageId);
     if (!sourceMessage.embeds.length) {
       return finalize(interaction, draft, 'That message has no embed to move. Nothing changed.');
@@ -180,8 +188,11 @@ async function sendPreview(interaction, draft) {
   if (draft.moveSourceUrl) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const parsed = parseMessageUrl(draft.moveSourceUrl);
+    const channel = await getChannelCached(interaction.client.channels, parsed.channelId);
+    if (!channel) {
+      return interaction.editReply({ content: 'Couldn’t load the move-source message anymore.' });
+    }
     try {
-      const channel = await interaction.client.channels.fetch(parsed.channelId);
       const message = await channel.messages.fetch(parsed.messageId);
       if (!message.embeds.length) {
         return interaction.editReply({ content: 'The move-source message no longer has an embed to preview.' });
@@ -219,12 +230,7 @@ async function performSend(interaction, draft) {
     return finalize(interaction, draft, 'Pick a target channel before sending.');
   }
 
-  let targetChannel;
-  try {
-    targetChannel = await interaction.guild.channels.fetch(draft.channelId);
-  } catch {
-    targetChannel = null;
-  }
+  const targetChannel = await getChannelCached(interaction.guild.channels, draft.channelId);
   if (!targetChannel || !targetChannel.isTextBased()) {
     return finalize(interaction, draft, 'That target channel is no longer available. Pick another one.');
   }
@@ -232,9 +238,12 @@ async function performSend(interaction, draft) {
   // Move Existing takes priority: repost the source embed(s), then delete the original.
   if (draft.moveSourceUrl) {
     const parsed = parseMessageUrl(draft.moveSourceUrl);
+    const sourceChannel = await getChannelCached(interaction.client.channels, parsed.channelId);
+    if (!sourceChannel) {
+      return finalize(interaction, draft, 'Couldn’t reload the move-source message. Set it again.');
+    }
     let sourceMessage;
     try {
-      const sourceChannel = await interaction.client.channels.fetch(parsed.channelId);
       sourceMessage = await sourceChannel.messages.fetch(parsed.messageId);
     } catch {
       return finalize(interaction, draft, 'Couldn’t reload the move-source message. Set it again.');
