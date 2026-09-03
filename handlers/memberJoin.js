@@ -1,10 +1,13 @@
 const store = require('../utils/store');
 const { lockAllChannels } = require('./raidLock');
+const { checkJoinForRaidSignals } = require('./raidAlert');
 const { logEvent } = require('./modLog');
 
-const BURST_JOIN_COUNT = 5; // this many joins...
-const BURST_WINDOW_MS = 10_000; // ...within this many ms triggers auto-lockdown
-const DEFAULT_MIN_ACCOUNT_AGE_DAYS = 7;
+const {
+  BURST_JOIN_COUNT,
+  BURST_WINDOW_MS,
+  DEFAULT_MIN_ACCOUNT_AGE_DAYS,
+} = require('../utils/raidThresholds');
 
 // guildId -> [{ member, time }] for joins in the current rolling window.
 // In-memory only — losing this on a restart just means the burst window
@@ -45,6 +48,11 @@ async function kickIfUnderAge(member, minAgeDays, guild) {
 async function handleGuildMemberAdd(member) {
   if (member.user.bot) return;
   const guild = member.guild;
+
+  // Early warning, on a lower threshold than the auto-lockdown below.
+  // Fired without await for the same reason logEvent is: an alert to the
+  // mod-log must never delay a kick or a lockdown.
+  checkJoinForRaidSignals(member).catch((err) => console.error('Raid alert failed:', err.message));
 
   if (!(await store.isRaidProtectActive(guild.id))) {
     const recent = recordJoin(guild.id, member);
