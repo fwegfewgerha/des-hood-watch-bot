@@ -5,6 +5,7 @@ const store = require('./utils/store');
 const commandList = require('./commands');
 const { handleButton, handleChannelSelect, handleModalSubmit } = require('./handlers/embedInteractions');
 const { handleMessageCreate } = require('./handlers/messageTracking');
+const { handleAutoMod } = require('./handlers/autoMod');
 const { handleVoiceStateUpdate, primeVoiceSessions } = require('./handlers/voiceTracking');
 const { handleGuildMemberAdd } = require('./handlers/memberJoin');
 
@@ -65,8 +66,20 @@ client.once(Events.ClientReady, (c) => {
   }
 });
 
+// Automod runs first and, when it deletes the message, short-circuits the
+// rest of the pipeline — a message that no longer exists shouldn't count
+// toward /stats or get a second notice from /secure's invite scan.
 client.on(Events.MessageCreate, (message) => {
-  handleMessageCreate(message).catch((err) => console.error('messageCreate handler error:', err));
+  handleAutoMod(message)
+    .then((deleted) => (deleted ? null : handleMessageCreate(message)))
+    .catch((err) => console.error('messageCreate handler error:', err));
+});
+
+// Editing a message re-runs it through automod, so posting something clean
+// and editing in a slur afterwards doesn't get a free pass. Only automod
+// runs here — stats and the invite scan already saw the original.
+client.on(Events.MessageUpdate, (_oldMessage, newMessage) => {
+  handleAutoMod(newMessage).catch((err) => console.error('messageUpdate handler error:', err));
 });
 
 client.on(Events.VoiceStateUpdate, (oldState, newState) => {

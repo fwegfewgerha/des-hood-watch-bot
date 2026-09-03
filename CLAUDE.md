@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Des Hood Watch — a Discord.js v14 bot (CommonJS) for a single Discord server. It provides a slash-command embed builder, invite-link auto-moderation, raid protection (channel lockdown + new-account auto-kick), mod-action logging, and member activity stats. Persistence is PostgreSQL via `pg`.
+Des Hood Watch — a Discord.js v14 bot (CommonJS) for a single Discord server. It provides a slash-command embed builder, content automod, invite-link auto-moderation, raid protection (channel lockdown + new-account auto-kick), mod-action logging, and member activity stats. Persistence is PostgreSQL via `pg`.
 
 ## Commands
 
@@ -55,6 +55,8 @@ Message/voice stats (`member_stats` table) are a separate, simpler always-write-
 ### Feature areas
 
 - **Embed builder** (`/embed`): `commands/embed.js` starts a draft; all follow-up interaction handling (buttons, the channel select, modal submissions) is in `handlers/embedInteractions.js`, dispatched from `index.js` by the `ehb:` custom-ID prefix (`ehb:field:<key>`, `ehb:move`, `ehb:channel`, `ehb:modal:<key>`). `utils/embedRender.js` renders the draft summary + component rows and builds the final `EmbedBuilder`; `utils/modals.js` defines the per-field modal config (`FIELD_CONFIG`) that both the button labels and modal handling key off of. "Move Existing" (`utils/parseMessageUrl.js`) reposts an embed from another message in the same guild and deletes the original, rather than building a new one.
+
+- **Automod**: always-on content filtering, enabled by default for every guild (the `automod_enabled` column defaults to `TRUE`, as does `defaultEntry()`), toggled with `/automod on|off` and inspected with `/automod status`. `handlers/autoMod.js` runs on both `messageCreate` and `messageUpdate` (so an edit can't sneak content in after the fact) and returns whether it deleted the message — `index.js` skips the rest of the message pipeline when it did. The rules themselves are pure functions in `utils/automodRules.js`: an ordered table checked most-serious-first, matching against a leetspeak/zero-width-normalized copy of the content. Only the adult-content rule sets `staffExempt` — every other category, spam included, applies to Administrators too. Spam detection (bursts, repeated messages) needs cross-message state, so it lives in the handler rather than the rule table. To add or loosen a category, edit the word lists or the `RULES` entry — `AMBIGUOUS_SLURS` is the list to trim first if members trip the filter innocently.
 
 - **Security**: `/secure` toggles invite-link auto-deletion, enforced in `handlers/messageTracking.js` (admins/Manage Messages are exempt). `/raidprotect on|off` locks/unlocks all text channels (`handlers/raidLock.js`, via `Promise.allSettled` over per-channel permission edits) and toggles auto-kicking of under-age accounts on join (`handlers/memberJoin.js`). `memberJoin.js` also auto-triggers the same lockdown when it detects a join burst (5+ joins within 10s) even if raid protection wasn't manually enabled, and retroactively age-checks every join in that burst. `/modlog set|off` controls where `handlers/modLog.js`'s `logEvent()` posts — it's called from across the security features and is a no-op if no log channel is configured.
 

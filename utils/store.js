@@ -6,8 +6,9 @@
 // Every function here is async — reflecting that this replaced an earlier
 // JSON-file store where the same functions were synchronous.
 //
-// SPEED DESIGN: every guild_settings field (secureEnabled, raidProtectActive,
-// minAccountAgeDays, logChannelId, lockedChannels) lives in one in-memory
+// SPEED DESIGN: every guild_settings field (secureEnabled, automodEnabled,
+// raidProtectActive, minAccountAgeDays, logChannelId, lockedChannels) lives
+// in one in-memory
 // cache per guild. Every read goes through that cache — never Postgres
 // directly. Every write updates the cache immediately and then fires the
 // actual Postgres write in the background (not awaited) — callers get
@@ -45,6 +46,13 @@ async function init() {
       log_channel_id TEXT,
       locked_channels JSONB NOT NULL DEFAULT '[]'::jsonb
     )
+  `);
+  // Added after the table shipped, so it has to be an ALTER rather than a
+  // column in the CREATE above. Defaults to TRUE: automod is meant to be
+  // running from the moment the bot joins, without anyone turning it on.
+  await pool.query(`
+    ALTER TABLE guild_settings
+    ADD COLUMN IF NOT EXISTS automod_enabled BOOLEAN NOT NULL DEFAULT TRUE
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS member_stats (
@@ -91,7 +99,7 @@ async function getMemberStats(guildId, userId) {
 
 // ---- Unified guild settings cache ----------------------------------------------
 
-const guildCache = new Map(); // guildId -> { secureEnabled, raidProtectActive, minAccountAgeDays, logChannelId, lockedChannels }
+const guildCache = new Map(); // guildId -> { secureEnabled, automodEnabled, raidProtectActive, minAccountAgeDays, logChannelId, lockedChannels }
 
 // In-flight load promises, keyed by guildId — dedupes concurrent cold
 // loads for the same guild so they all resolve to the SAME cache entry
@@ -104,6 +112,7 @@ const guildCacheLoads = new Map(); // guildId -> Promise<entry>
 function defaultEntry() {
   return {
     secureEnabled: false,
+    automodEnabled: true,
     raidProtectActive: false,
     minAccountAgeDays: null,
     logChannelId: null,
@@ -117,7 +126,7 @@ function loadGuildCache(guildId) {
 
   const p = (async () => {
     const res = await pool.query(
-      `SELECT secure_enabled, raid_protect_active, min_account_age_days, log_channel_id, locked_channels
+      `SELECT secure_enabled, automod_enabled, raid_protect_active, min_account_age_days, log_channel_id, locked_channels
        FROM guild_settings WHERE guild_id = $1`,
       [guildId]
     );
@@ -127,6 +136,7 @@ function loadGuildCache(guildId) {
     const entry = row
       ? {
           secureEnabled: row.secure_enabled,
+          automodEnabled: row.automod_enabled,
           raidProtectActive: row.raid_protect_active,
           minAccountAgeDays: row.min_account_age_days,
           logChannelId: row.log_channel_id,
@@ -146,12 +156,13 @@ function loadGuildCache(guildId) {
 // paying one lazy-load query. Call once at startup.
 async function warmRaidProtectCache() {
   const res = await pool.query(
-    `SELECT guild_id, secure_enabled, raid_protect_active, min_account_age_days, log_channel_id, locked_channels
+    `SELECT guild_id, secure_enabled, automod_enabled, raid_protect_active, min_account_age_days, log_channel_id, locked_channels
      FROM guild_settings`
   );
   for (const row of res.rows) {
     guildCache.set(row.guild_id, {
       secureEnabled: row.secure_enabled,
+      automodEnabled: row.automod_enabled,
       raidProtectActive: row.raid_protect_active,
       minAccountAgeDays: row.min_account_age_days,
       logChannelId: row.log_channel_id,
@@ -185,6 +196,19 @@ async function setSecureEnabled(guildId, enabled) {
   const entry = await loadGuildCache(guildId);
   entry.secureEnabled = enabled;
   persistField(guildId, 'secure_enabled', enabled);
+}
+
+// ---- Automod ----------------------------------------------------------------
+
+async function isAutoModEnabled(guildId) {
+  const entry = await loadGuildCache(guildId);
+  return entry.automodEnabled;
+}
+
+async function setAutoModEnabled(guildId, enabled) {
+  const entry = await loadGuildCache(guildId);
+  entry.automodEnabled = enabled;
+  persistField(guildId, 'automod_enabled', enabled);
 }
 
 // ---- Raid protect -------------------------------------------------------------
@@ -251,6 +275,8 @@ module.exports = {
   getMemberStats,
   isSecureEnabled,
   setSecureEnabled,
+  isAutoModEnabled,
+  setAutoModEnabled,
   getLockedChannels,
   setLockedChannels,
   isRaidProtectActive,
