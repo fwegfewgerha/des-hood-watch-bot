@@ -125,9 +125,16 @@ const MINOR_SEXUAL_RE = new RegExp(
 
 // ---- Scams, phishing and malware --------------------------------------------
 // Run against ctx.lower, not ctx.normalized — domains depend on digits.
+//
+// The lookalike-domain half starts at the domain token itself. It used to be
+// prefixed with `(?:https?:\/\/)?[\w.-]*`, which matched nothing extra — the
+// token is the anchor either way — but made the engine re-scan from every
+// position in a long unbroken run of word characters. On a pasted token or
+// hash that cost ~1.5ms of blocked event loop per message; without it the
+// same message costs microseconds. Don't reintroduce a leading `*` here.
 
 const SCAM_RE =
-  /free\s*(?:discord\s*)?nitro|nitro\s*(?:giveaway|gift|for free)|steam\s*gift\s*(?:card|link)|(?:claim|redeem)\s*your\s*(?:free\s*)?(?:nitro|gift)|free\s*(?:robux|v-?bucks)|double\s*your\s*(?:btc|eth|bitcoin|crypto)|(?:https?:\/\/)?[\w.-]*(?:d[i1l]s[ck]{1,2}[o0]rd|dicord|discrod|disocrd|steamcommunity|steamcomunity)[\w-]*\.(?:gift|ru|xyz|top|click|link|info|online|site|shop|cf|gq|ml|tk|icu|fun)\b|grabify\.link|iplogger\.(?:org|com|ru)|iplis\.ru|blasze\.(?:com|tk)|yip\.su|2no\.co/;
+  /free\s*(?:discord\s*)?nitro|nitro\s*(?:giveaway|gift|for free)|steam\s*gift\s*(?:card|link)|(?:claim|redeem)\s*your\s*(?:free\s*)?(?:nitro|gift)|free\s*(?:robux|v-?bucks)|double\s*your\s*(?:btc|eth|bitcoin|crypto)|(?:d[i1l]s[ck]{1,2}[o0]rd|dicord|discrod|disocrd|steamcommunity|steamcomunity)[\w-]*\.(?:gift|ru|xyz|top|click|link|info|online|site|shop|cf|gq|ml|tk|icu|fun)\b|grabify\.link|iplogger\.(?:org|com|ru)|iplis\.ru|blasze\.(?:com|tk)|yip\.su|2no\.co/;
 
 const ILLEGAL_SERVICE_RE =
   /(?:selling|buy|for sale|dm me for)\s*(?:cheap\s*)?(?:discord\s*)?(?:accounts?|tokens?|nitro codes?)|(?:ddos|booter|stresser|token\s*logger|ip\s*logger|server\s*nuker|rat\s*builder|crypter)\s*(?:service|for sale|selling|for hire|4 sale)|(?:selling|buying)\s*(?:hacked|cracked|stolen)\s*accounts?/;
