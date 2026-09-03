@@ -60,8 +60,13 @@ function wordMatcher(words) {
 
 // ---- Hate speech ------------------------------------------------------------
 
+// Server policy: "nigga"/"niggah" are in-group usage here and are
+// deliberately NOT filtered. "nigger" still is — the two are separated on
+// purpose, so don't collapse them back into one entry. Note that the hard-r
+// form has to stay out of AMBIGUOUS_SLURS too, or the separator-tolerant
+// matcher would start catching the allowed spelling.
 const SLURS = [
-  'nigger', 'nigga', 'niggah', 'chink', 'gook', 'wetback', 'kike',
+  'nigger', 'chink', 'gook', 'wetback', 'kike',
   'beaner', 'towelhead', 'raghead', 'sandnigger', 'jigaboo', 'porchmonkey',
   'groid', 'muzzie', 'zipperhead',
   'faggot', 'fagot', 'tranny', 'trannie', 'shemale',
