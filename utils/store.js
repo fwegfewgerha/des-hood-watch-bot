@@ -7,9 +7,8 @@
 // JSON-file store where the same functions were synchronous.
 //
 // SPEED DESIGN: every guild_settings field (secureEnabled, automodEnabled,
-// raidProtectActive, minAccountAgeDays, logChannelId, lockedChannels) lives
-// in one in-memory
-// cache per guild. Every read goes through that cache — never Postgres
+// raidProtectActive, minAccountAgeDays, logChannelId, lockedChannels,
+// joinBaseline) lives in one in-memory cache per guild. Every read goes through that cache — never Postgres
 // directly. Every write updates the cache immediately and then fires the
 // actual Postgres write in the background (not awaited) — callers get
 // their promise back as soon as the cache is updated, not after a network
@@ -53,6 +52,12 @@ async function init() {
   await pool.query(`
     ALTER TABLE guild_settings
     ADD COLUMN IF NOT EXISTS automod_enabled BOOLEAN NOT NULL DEFAULT TRUE
+  `);
+  // Learned join-rate baseline (utils/joinBaseline.js). Empty object means
+  // "nothing learned yet", which the alert treats as its fixed floor.
+  await pool.query(`
+    ALTER TABLE guild_settings
+    ADD COLUMN IF NOT EXISTS join_baseline JSONB NOT NULL DEFAULT '{}'::jsonb
   `);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS member_stats (
@@ -117,6 +122,7 @@ function defaultEntry() {
     minAccountAgeDays: null,
     logChannelId: null,
     lockedChannels: [],
+    joinBaseline: null,
   };
 }
 
@@ -126,7 +132,7 @@ function loadGuildCache(guildId) {
 
   const p = (async () => {
     const res = await pool.query(
-      `SELECT secure_enabled, automod_enabled, raid_protect_active, min_account_age_days, log_channel_id, locked_channels
+      `SELECT secure_enabled, automod_enabled, raid_protect_active, min_account_age_days, log_channel_id, locked_channels, join_baseline
        FROM guild_settings WHERE guild_id = $1`,
       [guildId]
     );
@@ -141,6 +147,7 @@ function loadGuildCache(guildId) {
           minAccountAgeDays: row.min_account_age_days,
           logChannelId: row.log_channel_id,
           lockedChannels: row.locked_channels ?? [],
+          joinBaseline: row.join_baseline ?? null,
         }
       : defaultEntry();
     guildCache.set(guildId, entry);
@@ -156,7 +163,7 @@ function loadGuildCache(guildId) {
 // paying one lazy-load query. Call once at startup.
 async function warmRaidProtectCache() {
   const res = await pool.query(
-    `SELECT guild_id, secure_enabled, automod_enabled, raid_protect_active, min_account_age_days, log_channel_id, locked_channels
+    `SELECT guild_id, secure_enabled, automod_enabled, raid_protect_active, min_account_age_days, log_channel_id, locked_channels, join_baseline
      FROM guild_settings`
   );
   for (const row of res.rows) {
@@ -167,6 +174,7 @@ async function warmRaidProtectCache() {
       minAccountAgeDays: row.min_account_age_days,
       logChannelId: row.log_channel_id,
       lockedChannels: row.locked_channels ?? [],
+      joinBaseline: row.join_baseline ?? null,
     });
   }
 }
@@ -254,6 +262,26 @@ async function setLockedChannels(guildId, channelIds) {
     .catch((err) => console.error(`Failed to persist locked_channels for guild ${guildId}:`, err));
 }
 
+// ---- Join-rate baseline -------------------------------------------------------
+
+async function getJoinBaseline(guildId) {
+  const entry = await loadGuildCache(guildId);
+  return entry.joinBaseline;
+}
+
+async function setJoinBaseline(guildId, baseline) {
+  const entry = await loadGuildCache(guildId);
+  entry.joinBaseline = baseline;
+  // JSONB, so it needs the same explicit cast as locked_channels.
+  pool
+    .query(
+      `INSERT INTO guild_settings (guild_id, join_baseline) VALUES ($1, $2::jsonb)
+       ON CONFLICT (guild_id) DO UPDATE SET join_baseline = $2::jsonb`,
+      [guildId, JSON.stringify(baseline)]
+    )
+    .catch((err) => console.error(`Failed to persist join_baseline for guild ${guildId}:`, err));
+}
+
 // ---- Mod log ------------------------------------------------------------------
 
 async function getLogChannelId(guildId) {
@@ -283,6 +311,8 @@ module.exports = {
   setRaidProtectActive,
   getMinAccountAgeDays,
   setMinAccountAgeDays,
+  getJoinBaseline,
+  setJoinBaseline,
   getLogChannelId,
   setLogChannelId,
 };

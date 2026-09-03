@@ -8,6 +8,7 @@ const { handleMessageCreate } = require('./handlers/messageTracking');
 const { handleAutoMod } = require('./handlers/autoMod');
 const { handleVoiceStateUpdate, primeVoiceSessions } = require('./handlers/voiceTracking');
 const { handleGuildMemberAdd } = require('./handlers/memberJoin');
+const { startBaselineTicker } = require('./utils/joinBaseline');
 
 if (!process.env.DISCORD_TOKEN) {
   console.error('Missing DISCORD_TOKEN. Copy .env.example to .env and fill it in.');
@@ -52,6 +53,10 @@ for (const command of commandList) {
 client.once(Events.ClientReady, (c) => {
   console.log(`Des Hood Watch is online as ${c.user.tag}`);
   primeVoiceSessions(c);
+  // Folds each completed 10-minute bucket into the learned join-rate
+  // baseline, including the empty ones — a quiet stretch is exactly what
+  // the raid alert needs to know about.
+  startBaselineTicker(c);
   store.warmRaidProtectCache().catch((err) => console.error('Failed to warm raid-protect cache:', err));
 
   // Pull the full member list into the gateway cache once, so the cache-first

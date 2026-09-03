@@ -12,6 +12,7 @@
 
 const { EmbedBuilder } = require('discord.js');
 const store = require('../utils/store');
+const joinBaseline = require('../utils/joinBaseline');
 const {
   BURST_JOIN_COUNT,
   BURST_WINDOW_MS,
@@ -69,10 +70,25 @@ function record(guild, member) {
 }
 
 // Returns the human-readable reasons this window looks like a raid, or an
-// empty array if it just looks like a busy afternoon.
-function collectSignals(joins) {
+// empty array if it just looks like a busy afternoon. `rate` is the learned
+// join-rate verdict from utils/joinBaseline.js, or null if unavailable.
+function collectSignals(joins, rate) {
   const now = Date.now();
   const signals = [];
+
+  // The learned signal: how this ten minutes compares to what this server
+  // normally does at this time of day. It's the only one that can catch a
+  // slow raid — accounts trickling in below the burst threshold — and the
+  // only one that stays quiet when a genuine growth spurt makes the fixed
+  // thresholds look alarming.
+  if (rate?.exceeded) {
+    signals.push(
+      rate.learned
+        ? `**${rate.trailing} joins** in the last 10 minutes — normally about ` +
+            `${rate.mean.toFixed(1)} at this time of day (alerting above ${rate.threshold})`
+        : `**${rate.trailing} joins** in the last 10 minutes (still learning this server's normal rate)`
+    );
+  }
 
   const paced = joins.filter((j) => now - j.at < PACE_WINDOW_MS);
   if (paced.length >= PACE_COUNT) {
@@ -142,6 +158,18 @@ async function sendAlert(guild, joins, signals) {
 async function checkJoinForRaidSignals(member) {
   const guild = member.guild;
 
+  // Recorded before the early return below, so the baseline keeps learning
+  // through a lockdown instead of going blind exactly when the numbers are
+  // most unusual. joinBaseline clips what it learns from an alarming
+  // bucket, so a raid can't teach it that raids are normal here.
+  const rate = await joinBaseline
+    .noteJoin(guild.id)
+    .then(() => joinBaseline.assess(guild.id))
+    .catch((err) => {
+      console.error('Join baseline unavailable:', err.message);
+      return null;
+    });
+
   // Once raid protection is on, the mods already know and every join is
   // being kicked or screened — another alert adds nothing.
   if (await store.isRaidProtectActive(guild.id)) {
@@ -150,7 +178,7 @@ async function checkJoinForRaidSignals(member) {
   }
 
   const joins = record(guild, member);
-  const signals = collectSignals(joins);
+  const signals = collectSignals(joins, rate);
   if (signals.length === 0) return false;
 
   const now = Date.now();
