@@ -9,6 +9,7 @@ const { handleAutoMod } = require('./handlers/autoMod');
 const { handleVoiceStateUpdate, primeVoiceSessions } = require('./handlers/voiceTracking');
 const { handleGuildMemberAdd } = require('./handlers/memberJoin');
 const { startBaselineTicker } = require('./utils/joinBaseline');
+const { startCcuWatch } = require('./utils/ccuWatch');
 
 if (!process.env.DISCORD_TOKEN) {
   console.error('Missing DISCORD_TOKEN. Copy .env.example to .env and fill it in.');
@@ -57,6 +58,9 @@ client.once(Events.ClientReady, (c) => {
   // baseline, including the empty ones — a quiet stretch is exactly what
   // the raid alert needs to know about.
   startBaselineTicker(c);
+  // Puts the Roblox game's live player count in the bot's presence, and
+  // keeps it there. Polls on its own timer; nothing else waits on it.
+  startCcuWatch(c);
   store.warmRaidProtectCache().catch((err) => console.error('Failed to warm raid-protect cache:', err));
 
   // Pull the full member list into the gateway cache once, so the cache-first
