@@ -98,6 +98,23 @@ client.on(Events.GuildMemberAdd, (member) => {
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
+  // Autocomplete can't be answered with a message, so it can't share the
+  // rejection path below: an unauthorized user gets an empty suggestion
+  // list, and the actual refusal comes when they try to run the command.
+  if (interaction.isAutocomplete()) {
+    if (!ALLOWED_USER_IDS.has(interaction.user.id)) {
+      return interaction.respond([]).catch(() => {});
+    }
+    const command = client.commands.get(interaction.commandName);
+    if (!command?.autocomplete) return;
+    try {
+      return await command.autocomplete(interaction);
+    } catch (err) {
+      console.error('Autocomplete error:', err);
+      return interaction.respond([]).catch(() => {});
+    }
+  }
+
   if (!ALLOWED_USER_IDS.has(interaction.user.id)) {
     await interaction
       .reply({ content: 'You are not authorized to use this bot.', flags: MessageFlags.Ephemeral })
