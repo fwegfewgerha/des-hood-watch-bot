@@ -1,5 +1,6 @@
 const store = require('../utils/store');
 const { logEvent } = require('./modLog');
+const { deleteMessageWithRetry, ALREADY_GONE, FAILED } = require('../utils/deleteMessage');
 
 // Matches discord.gg/xxx, discord.com/invite/xxx, discordapp.com/invite/xxx,
 // with or without a protocol/www prefix.
@@ -29,10 +30,10 @@ async function handleMessageCreate(message) {
   // The delete is the actual protective action — it's awaited so a
   // failure is caught and reported. Everything after it (the notice, the
   // mod-log entry) doesn't need to finish before this handler returns.
-  try {
-    await message.delete();
-  } catch (err) {
-    console.error('Secure: failed to delete invite message:', err.message);
+  const deletion = await deleteMessageWithRetry(message);
+  if (deletion.status === ALREADY_GONE) return; // someone else got to it first
+  if (deletion.status === FAILED) {
+    console.error('Secure: failed to delete invite message:', deletion.error.message);
     return;
   }
 

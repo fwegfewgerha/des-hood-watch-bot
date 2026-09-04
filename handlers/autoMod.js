@@ -9,6 +9,12 @@ const { PermissionFlagsBits } = require('discord.js');
 const store = require('../utils/store');
 const { logEvent } = require('./modLog');
 const { RULES, buildContext } = require('../utils/automodRules');
+const {
+  deleteMessageWithRetry,
+  ALREADY_GONE,
+  FAILED,
+  DELETE_ATTEMPTS,
+} = require('../utils/deleteMessage');
 
 const NOTICE = 'you violated server rules — message deleted.';
 const NOTICE_LIFETIME_MS = 6000;
@@ -94,13 +100,21 @@ async function handleAutoMod(rawMessage) {
   // The delete is the actual moderation action, so it's awaited and its
   // failure is reported. The notice and the log entry follow it and
   // don't need to finish before this handler returns.
-  try {
-    await message.delete();
-  } catch (err) {
-    console.error(`Automod: failed to delete ${hit.id} message:`, err.message);
+  const deletion = await deleteMessageWithRetry(message);
+
+  // The message was gone before we got to it, which for a rule hit is a
+  // fine outcome — but whoever removed it first already posted the notice
+  // and the log entry, so this path stays quiet rather than doubling them.
+  if (deletion.status === ALREADY_GONE) return true;
+
+  if (deletion.status === FAILED) {
+    console.error(`Automod: failed to delete ${hit.id} message:`, deletion.error.message);
+    const reason = deletion.permanent
+      ? "check the bot's Manage Messages permission"
+      : `Discord was unreachable across ${DELETE_ATTEMPTS} attempts — the message is still up`;
     logEvent(
       message.guild,
-      `⚠️ **Automod could not delete** a message from ${message.author} in ${message.channel} (${hit.label}) — check the bot's Manage Messages permission.`
+      `⚠️ **Automod could not delete** a message from ${message.author} in ${message.channel} (${hit.label}) — ${reason}.`
     ).catch(() => {});
     return false;
   }
