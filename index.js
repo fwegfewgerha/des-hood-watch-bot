@@ -2,6 +2,8 @@ require('dotenv').config();
 const { Client, GatewayIntentBits, Collection, Events, MessageFlags } = require('discord.js');
 
 const store = require('./utils/store');
+// Who may use the bot — and, in the passive handlers, who the bot leaves alone.
+const { isAllowedUser } = require('./utils/allowlist');
 const commandList = require('./commands');
 const { handleButton, handleChannelSelect, handleModalSubmit } = require('./handlers/embedInteractions');
 const { handleMessageCreate } = require('./handlers/messageTracking');
@@ -22,12 +24,11 @@ if (!process.env.ALLOWED_USER_IDS) {
 }
 
 // Every interaction (slash commands and the embed builder's buttons/selects/
-// modals) is gated to this set, independent of Discord's own role/permission
+// modals) is gated to this list, independent of Discord's own role/permission
 // system — so even someone with Administrator on the server can't use the
-// bot unless their user ID is explicitly listed here.
-const ALLOWED_USER_IDS = new Set(
-  process.env.ALLOWED_USER_IDS.split(',').map((id) => id.trim()).filter(Boolean)
-);
+// bot unless their user ID is explicitly listed there. The same list also
+// exempts those users from the passive features (automod, invite deletion,
+// raid auto-kick); see utils/allowlist.js.
 
 const client = new Client({
   intents: [
@@ -106,7 +107,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
   // rejection path below: an unauthorized user gets an empty suggestion
   // list, and the actual refusal comes when they try to run the command.
   if (interaction.isAutocomplete()) {
-    if (!ALLOWED_USER_IDS.has(interaction.user.id)) {
+    if (!isAllowedUser(interaction.user.id)) {
       return interaction.respond([]).catch(() => {});
     }
     const command = client.commands.get(interaction.commandName);
@@ -119,7 +120,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   }
 
-  if (!ALLOWED_USER_IDS.has(interaction.user.id)) {
+  if (!isAllowedUser(interaction.user.id)) {
     await interaction
       .reply({ content: 'You are not authorized to use this bot.', flags: MessageFlags.Ephemeral })
       .catch(() => {});

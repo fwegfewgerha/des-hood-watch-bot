@@ -1,4 +1,5 @@
 const store = require('../utils/store');
+const { isAllowedUser } = require('../utils/allowlist');
 const { logEvent } = require('./modLog');
 const { deleteMessageWithRetry, ALREADY_GONE, FAILED } = require('../utils/deleteMessage');
 
@@ -20,11 +21,13 @@ async function handleMessageCreate(message) {
   if (!INVITE_RE.test(message.content)) return;
 
   // Staff are exempt — the goal is catching compromised/spam accounts,
-  // not blocking mods from sharing a partner server's invite.
+  // not blocking mods from sharing a partner server's invite. Whitelisted
+  // users are exempt too, and by user ID rather than by permission, so it
+  // holds even when they post without a staff role on.
   const member = message.member;
-  const isExempt = member && (
+  const isExempt = isAllowedUser(message.author.id) || Boolean(member && (
     member.permissions.has('Administrator') || member.permissions.has('ManageMessages')
-  );
+  ));
   if (isExempt) return;
 
   // The delete is the actual protective action — it's awaited so a

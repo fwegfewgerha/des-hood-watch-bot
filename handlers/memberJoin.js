@@ -1,4 +1,5 @@
 const store = require('../utils/store');
+const { isAllowedUser } = require('../utils/allowlist');
 const { lockAllChannels } = require('./raidLock');
 const { checkJoinForRaidSignals } = require('./raidAlert');
 const { logEvent } = require('./modLog');
@@ -47,6 +48,11 @@ async function kickIfUnderAge(member, minAgeDays, guild) {
 
 async function handleGuildMemberAdd(member) {
   if (member.user.bot) return;
+  // Whitelisted users are exempt from the whole join path: never
+  // auto-kicked over account age, and never counted toward the burst
+  // window or the raid alert — someone on the operator list rejoining
+  // isn't evidence of anything.
+  if (isAllowedUser(member.id)) return;
   const guild = member.guild;
 
   // Early warning, on a lower threshold than the auto-lockdown below.

@@ -1,12 +1,14 @@
 // Always-on message automod. Unlike the slash commands, this is a passive
-// feature: it runs for every member of the server on every message and
-// every edit, for as long as the bot is up — there is no ALLOWED_USER_IDS
-// gate on it, the same way /secure's invite scanning has none.
+// feature: it runs on every message and every edit, for as long as the bot
+// is up. The one exception is the ALLOWED_USER_IDS whitelist — the people
+// trusted to run the bot are exempt from it, the same way they're exempt
+// from /secure's invite scanning and raid protection's auto-kick.
 //
 // The rules it enforces live in utils/automodRules.js.
 
 const { PermissionFlagsBits } = require('discord.js');
 const store = require('../utils/store');
+const { isAllowedUser } = require('../utils/allowlist');
 const { logEvent } = require('./modLog');
 const { RULES, buildContext } = require('../utils/automodRules');
 const {
@@ -81,6 +83,10 @@ async function handleAutoMod(rawMessage) {
   }
 
   if (!message.guild || !message.author || message.author.bot || message.system) return false;
+  // Whitelisted users are exempt outright — checked before the spam
+  // tracker below, so their messages don't even accumulate history that
+  // could trip a burst on someone else's key later.
+  if (isAllowedUser(message.author.id)) return false;
   if (!(await store.isAutoModEnabled(message.guild.id))) return false; // cached — no DB wait
 
   const ctx = buildContext(message);
